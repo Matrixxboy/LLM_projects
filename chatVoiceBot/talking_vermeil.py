@@ -4,10 +4,12 @@ import requests
 import textwrap
 import speech_recognition as sr
 from TTS.api import TTS
+import geocoder
+import datetime
 
 # 🧠 OLLAMA Config
 OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "vermeil" # You can also use mistral, llama3, etc.
+OLLAMA_MODEL = "vermeil"
 
 # 🎤 Load the TTS model
 tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=torch.cuda.is_available())
@@ -15,6 +17,21 @@ tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False,
 # 🎙️ Setup speech recognizer
 recognizer = sr.Recognizer()
 mic = sr.Microphone()
+
+# 🌤️ Weather fetch function
+def get_weather():
+    try:
+        # Get location based on IP
+        g = geocoder.ip('me')
+        lat, lon = g.latlng
+        # Use Open-Meteo (no API key required)
+        weather_api = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        res = requests.get(weather_api).json()
+        temp = res["current_weather"]["temperature"]
+        wind = res["current_weather"]["windspeed"]
+        return f"Current weather: {temp}°C, Wind speed: {wind} km/h."
+    except Exception as e:
+        return "Weather data not available."
 
 # 🔁 Conversation loop
 while True:
@@ -28,15 +45,24 @@ while True:
         user_prompt = recognizer.recognize_google(audio_input)
         print(f"\n🧑 You said: {user_prompt}")
 
-        # 🔚 Exit if needed
         if user_prompt.lower() in ['exit', 'quit']:
             print("👋 Goodbye.")
             break
 
+        # 📡 Get weather & other context
+        weather_info = get_weather()
+        now = datetime.datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
+
+        # 🧠 Final prompt with context injection
+        context_prompt = (
+            f"[System Info]\nTime: {now}\n{weather_info}\n\n"
+            f"[User]: {user_prompt}\n[Assistant]:"
+        )
+
         # 🧠 Generate response from Ollama
         response = requests.post(
             OLLAMA_URL,
-            json={"model": OLLAMA_MODEL, "prompt": user_prompt, "stream": False}
+            json={"model": OLLAMA_MODEL, "prompt": context_prompt, "stream": False}
         )
         reply = response.json().get("response", "").strip()
 
